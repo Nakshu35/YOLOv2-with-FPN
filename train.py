@@ -9,7 +9,7 @@ import numpy as np
 
 from Data.voc_dataset import VOC_dataset
 from Data.collate_fn import collate_fn
-from Data.config import C, Inp_size, Epochs, Batch_size, Lr
+from Data.config import C, Inp_size, Epochs, Batch_size, Lr, Wd
 from Data.anchor_boxes import extract_box_wh, kmeans
 
 from Data.Target_builder import YOLO_TargetBuilder_FPN
@@ -25,8 +25,7 @@ transform = T.Compose([
 
 root_path = "D:\\DLCV_AI\\Project\\YOLOv2\\VOCdevkit\\VOC"
 
-# ---------------- Dataset ----------------
-
+# Dataset
 Voc_07 = VOC_dataset(root=root_path, year="2007",
                      image_set="trainval", transform=transform)
 
@@ -50,18 +49,14 @@ val_loader = DataLoader(Voc_07_val,
                         shuffle=False,
                         collate_fn=collate_fn)
 
-# ---------------- Anchors ----------------
-
+# Anchors
 boxes_07 = extract_box_wh(Voc_07, Inp_size)
 boxes_12 = extract_box_wh(Voc_12, Inp_size)
-
 all_boxes = np.concatenate([boxes_07, boxes_12], axis=0)
-
 anchors = kmeans(all_boxes, k=9)
 anchors = torch.tensor(anchors, dtype=torch.float32).to(device)
 
-# ---------------- Model ----------------
-
+# Model
 target_builder = YOLO_TargetBuilder_FPN(
     anchors=anchors,
     C=C,
@@ -70,19 +65,16 @@ target_builder = YOLO_TargetBuilder_FPN(
 
 model = YOLOv2_FPN_Model(C, anchors).to(device)
 criterion = YOLO_loss_FPN()
-optimizer = optim.Adam(model.parameters(), lr=Lr)
+optimizer = optim.SGD(model.parameters(), lr=Lr, weight_decay=Wd, momentum=0.9)
 
-checkpoint_dir = "checkpoints/YOLOv2_FPN"
+checkpoint_dir = "checkpoints"
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 train_losses = []
 val_losses = []
 best_val_loss = float("inf")
 
-# ==========================================================
 # Training
-# ==========================================================
-
 for epoch in range(Epochs):
 
     model.train()
@@ -118,6 +110,7 @@ for epoch in range(Epochs):
 
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         optimizer.step()
 
         epoch_train_loss += loss.item()
@@ -130,7 +123,7 @@ for epoch in range(Epochs):
     epoch_train_loss /= len(dataloader)
     train_losses.append(epoch_train_loss)
 
-    # ---------------- Validation ----------------
+    # Validation
 
     model.eval()
     epoch_val_loss = 0.0
@@ -165,35 +158,24 @@ for epoch in range(Epochs):
     epoch_val_loss /= len(val_loader)
     val_losses.append(epoch_val_loss)
 
-    print(f"\nEpoch [{epoch+1}/{Epochs}] "
-          f"Train Loss: {epoch_train_loss:.4f} "
-          f"Val Loss: {epoch_val_loss:.4f}")
+    print(f"\nEpoch [{epoch+1}/{Epochs}] "f"Train Loss: {epoch_train_loss:.4f} " f"Val Loss: {epoch_val_loss:.4f}")
 
     if epoch_val_loss < best_val_loss:
         best_val_loss = epoch_val_loss
-        torch.save(model.state_dict(),
-                   os.path.join(checkpoint_dir,
-                                "best_model.pth"))
+        torch.save(model.state_dict(),os.path.join(checkpoint_dir, "best_model.pth"))
         print("Best model saved.")
 
 # Save last
-torch.save(model.state_dict(),
-           os.path.join(checkpoint_dir,
-                        "last_model.pth"))
+torch.save(model.state_dict(), os.path.join(checkpoint_dir, "last_model.pth"))
 
-# ---------------- Loss Graph ----------------
-
+# Loss Graph
 plt.figure()
-plt.plot(range(1, Epochs+1),
-         train_losses, label="Train Loss")
-plt.plot(range(1, Epochs+1),
-         val_losses, label="Validation Loss")
-
+plt.plot(range(1, Epochs+1), train_losses, label="Train Loss")
+plt.plot(range(1, Epochs+1), val_losses, label="Validation Loss")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.title("Training vs Validation Loss")
 plt.legend()
 plt.grid()
-plt.savefig(os.path.join(checkpoint_dir,
-                         "loss_curve.png"))
+plt.savefig(os.path.join(checkpoint_dir, "loss_curve.png"))
 plt.close()
