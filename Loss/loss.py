@@ -3,43 +3,71 @@ import torch.nn as nn
 
 
 class YOLO_loss_FPN(nn.Module):
-    def __init__(self, lambda_coord=5, lambda_noObj=0.5):
+    def __init__(self, lambda_coord=5.0, lambda_noobj=0.5):
         super().__init__()
-        self.lamda_coord = lambda_coord
-        self.lambda_noObj = lambda_noObj
+
+        self.lambda_coord = lambda_coord
+        self.lambda_noobj = lambda_noobj
+
         self.mse = nn.MSELoss(reduction='sum')
         self.bce = nn.BCEWithLogitsLoss(reduction='sum')
 
-    def single(self, preds, target):
+    def single_scale_loss(self, preds, target):
 
-        obj = target[..., 4] == 1
-        noobj = target[..., 4] == 0
+        device = preds.device
+        batch_size = preds.size(0)
 
-        loc = self.lamda_coord * self.mse(
-            preds[..., 0:4][obj],
-            target[..., 0:4][obj]
-        )
+        obj_mask = target[..., 4] == 1
+        noobj_mask = target[..., 4] == 0
 
-        obj_loss = self.bce(
-            preds[..., 4][obj],
-            target[..., 4][obj]
-        )
+        total_loss = torch.tensor(0.0, device=device)
 
-        noobj_loss = self.bce(
-            preds[..., 4][noobj],
-            target[..., 4][noobj]
-        )
+        # ------------------ Localization ------------------
+        if obj_mask.any():
 
-        cls = self.bce(
-            preds[..., 5:][obj],
-            target[..., 5:][obj]
-        )
+            pred_box = preds[..., 0:4][obj_mask]
+            target_box = target[..., 0:4][obj_mask]
 
-        return loc + obj_loss + self.lambda_noObj * noobj_loss + cls
+            # Clamp predictions to prevent explosion
+            pred_box = torch.clamp(pred_box, -10, 10)
 
-    def forward(self, p13, p26, p52, t13, t26, t52):
-        return (
-            self.single(p13, t13) +
-            self.single(p26, t26) +
-            self.single(p52, t52)
-        )
+            loc_loss = self.lambda_coord * self.mse(pred_box, target_box)
+            total_loss += loc_loss
+
+        # ------------------ Objectness ------------------
+        if obj_mask.any():
+            obj_loss = self.bce(
+                preds[..., 4][obj_mask],
+                target[..., 4][obj_mask]
+            )
+            total_loss += obj_loss
+
+        # ------------------ No Object ------------------
+        if noobj_mask.any():
+            noobj_loss = self.bce(
+                preds[..., 4][noobj_mask],
+                target[..., 4][noobj_mask]
+            )
+            total_loss += self.lambda_noobj * noobj_loss
+
+        # ------------------ Classification ------------------
+        if obj_mask.any():
+            pred_cls = preds[..., 5:][obj_mask]
+            target_cls = target[..., 5:][obj_mask]
+
+            cls_loss = self.bce(pred_cls, target_cls)
+            total_loss += cls_loss
+
+        # Normalize ONLY by batch (paper-like)
+        total_loss = total_loss / batch_size
+
+        return total_loss
+
+    def forward(self, p13, p26, p52,
+                t13, t26, t52):
+
+        loss_13 = self.single_scale_loss(p13, t13)
+        loss_26 = self.single_scale_loss(p26, t26)
+        loss_52 = self.single_scale_loss(p52, t52)
+
+        return loss_13 + loss_26 + loss_52
