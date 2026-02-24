@@ -5,7 +5,7 @@ __pycache__/
 *.pyd
 
 # Ignore VOCdevkit folder
-VOCdevkit/
+checkpoints/
 
 # Ignore virtual environments
 venv/

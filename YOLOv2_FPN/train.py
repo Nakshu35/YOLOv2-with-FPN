@@ -67,7 +67,7 @@ model = YOLOv2_FPN_Model(C, anchors).to(device)
 criterion = YOLO_loss_FPN()
 optimizer = optim.SGD(model.parameters(), lr=Lr, weight_decay=Wd, momentum=0.9)
 
-checkpoint_dir = "checkpoints"
+checkpoint_dir = "checkpoints\\VOC"
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 train_losses = []

@@ -1,0 +1,9 @@
+S = 20  # Grid cells
+B = 5   # Anchors
+C = 10  # Classes
+K = 5   # Clusters
+Epochs = 100
+Batch_size = 4
+Lr = 1e-4
+Wd = 5e-4
+Inp_size = 640  # Input size
